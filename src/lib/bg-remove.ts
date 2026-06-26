@@ -77,7 +77,11 @@ export async function removeBackground(input: Buffer): Promise<Buffer> {
     tryNext(x, y + 1);
   }
 
+  // Sprites render at <=~95px on screen, so a full-res ~1k PNG is ~2.6MB of dead
+  // weight. Downscale to 512px max + palette-quantise: pixel-art has a limited
+  // palette, so this is near-lossless but ~10-20x smaller (huge first-load win).
   return sharp(data, { raw: { width, height, channels } })
-    .png()
+    .resize({ width: 512, height: 512, fit: "inside", withoutEnlargement: true })
+    .png({ palette: true, quality: 90, effort: 7 })
     .toBuffer();
 }

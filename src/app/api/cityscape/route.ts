@@ -23,7 +23,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const headers = { "Cache-Control": "no-store" };
+    // Geometry is ~static (real OSM streets + footprints) — cache hard at the CDN.
+    const headers = {
+      "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+    };
     if (!url.searchParams.get("refresh")) {
       const cached = await getCityscape(district.slug);
       if (cached) return Response.json(cached, { headers });

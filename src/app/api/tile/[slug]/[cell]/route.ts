@@ -31,10 +31,13 @@ export async function GET(
     return new Response(tile.stream, {
       headers: {
         "Content-Type": tile.contentType,
-        // The agent regenerates tiles in place (Phase 4), so a stale cache would
-        // hide updates. Don't store; revalidate every load. (Phase 6 can add
-        // ETag-based conditional caching once tile URLs carry a version.)
-        "Cache-Control": "no-store",
+        // Tiles are large PNGs and change rarely (only when the daily agent
+        // regenerates a cell). Let the Vercel CDN cache them so reloads hit the
+        // edge, not this proxy + Blob round-trip. stale-while-revalidate serves
+        // an instant (possibly 1-build-old) tile while refreshing in the
+        // background — a brief staleness window is fine for a living map.
+        "Cache-Control":
+          "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
       },
     });
   } catch (err) {
