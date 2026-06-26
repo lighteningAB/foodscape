@@ -47,14 +47,21 @@ export async function geocode(
   const url =
     `${NOMINATIM}?format=jsonv2&limit=1&countrycodes=gb&q=` +
     encodeURIComponent(address);
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-GB" },
-  });
-  if (!res.ok) return null;
-  const hits = (await res.json()) as Array<{ lat: string; lon: string }>;
-  const hit = hits[0];
-  if (!hit) return null;
-  return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) };
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-GB" },
+      // Bound the call — a slow/queued Nominatim must not hang the pipeline.
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const hits = (await res.json()) as Array<{ lat: string; lon: string }>;
+    const hit = hits[0];
+    if (!hit) return null;
+    return { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) };
+  } catch {
+    // Timeout / network hiccup — skip this address.
+    return null;
+  }
 }
 
 /**
@@ -79,6 +86,9 @@ export async function realBuildingForm(
         "User-Agent": USER_AGENT,
       },
       body: "data=" + encodeURIComponent(query),
+      // [timeout:25] is the server-side query cap; this bounds a hung/queued
+      // HTTP connection so a slow Overpass falls back to the generic form.
+      signal: AbortSignal.timeout(12000),
     });
     if (res.ok) {
       const json = (await res.json()) as { elements?: OverpassWay[] };

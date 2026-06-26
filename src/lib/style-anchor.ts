@@ -79,3 +79,39 @@ export function buildBuildingPrompt(
     "Single building centered on its tile. Fully transparent background. No text, no labels, no extra scenery.",
   ].join("\n");
 }
+
+/**
+ * Prompt for a generic FILLER building — used for cells with no restaurant so
+ * the city is DENSE (every parcel built on). Same transparent single-building
+ * format as `buildBuildingPrompt`; the app draws the ground/roads, so each tile
+ * is just one food building that sits on its parcel. `seed` varies the food so
+ * neighbours differ.
+ */
+/**
+ * A food building for a ZONE: a generic London building in a given signature
+ * food. `seed` varies the massing so a zone's reused sprites differ. Shape need
+ * not be exact (zones are about coherent food neighbourhoods, not footprints).
+ */
+export function buildFoodBuildingPrompt(foodMaterial: string, seed = 0): string {
+  const forms = [
+    "a 3-storey London terraced townhouse with a pitched roof and 3 window bays",
+    "a 2-storey corner shop building with a flat parapet roof",
+    "a narrow 4-storey Victorian terrace with sash windows",
+    "a 5-storey mansion block with a mansard roof",
+    "a squat 2-storey building with a shopfront at street level",
+  ];
+  return buildBuildingPrompt(forms[seed % forms.length], foodMaterial);
+}
+
+export function buildFillerBuildingPrompt(seed = 0): string {
+  const buildings = [
+    { form: "a 3-storey London terraced townhouse with a pitched roof", food: "crusty bread loaves and golden croissants" },
+    { form: "a squat 2-storey corner shop with a flat roof", food: "stacked wheels of cheese and butter blocks" },
+    { form: "a narrow 4-storey Victorian terrace", food: "layered slices of cake and pastry" },
+    { form: "a small 2-storey pub building", food: "roast potatoes and golden pie crust" },
+    { form: "a 5-storey mansion block", food: "stacked dumplings and bao buns" },
+    { form: "a low warehouse with a sawtooth roof", food: "rows of sushi rolls and nori" },
+  ];
+  const b = buildings[seed % buildings.length];
+  return buildBuildingPrompt(b.form, b.food);
+}

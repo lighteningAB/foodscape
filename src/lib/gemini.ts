@@ -162,3 +162,153 @@ export async function restaurantToSpec(
   }
   return JSON.parse(text) as RestaurantSpec[];
 }
+
+/** A parsed JARVIS voice command. `action` drives the map; `reply_text` is spoken. */
+export interface JarvisIntent {
+  action: "move_to" | "find_cuisine" | "describe" | "refresh";
+  /** Target district slug for move_to / refresh (lowercased). */
+  district?: string;
+  /** Cuisine / food keyword to search for (find_cuisine). */
+  cuisine?: string;
+  /** Short, friendly spoken reply (one or two sentences). */
+  reply_text: string;
+}
+
+const INTENT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    action: {
+      type: Type.STRING,
+      enum: ["move_to", "find_cuisine", "describe", "refresh"],
+      description:
+        "move_to = fly the camera to a district; find_cuisine = find + highlight food of a cuisine/dish; describe = talk about the best spot; refresh = re-run the live agent to update the city",
+    },
+    district: {
+      type: Type.STRING,
+      description: "Lowercase district slug if one is named (e.g. soho, shoreditch). Omit if none.",
+    },
+    cuisine: {
+      type: Type.STRING,
+      description:
+        "For find_cuisine: the cuisine or food keyword to search (e.g. italian, ramen, sushi, pizza). Omit otherwise.",
+    },
+    reply_text: {
+      type: Type.STRING,
+      description:
+        "A short, warm spoken reply (<= 2 sentences) JARVIS says back, e.g. 'On it — flying you to the Italian spots in Soho.'",
+    },
+  },
+  required: ["action", "reply_text"],
+  propertyOrdering: ["action", "district", "cuisine", "reply_text"],
+};
+
+/**
+ * Parse a JARVIS voice transcript into a structured intent (guaranteed-shape via
+ * responseSchema). The route then acts on the intent (move camera / query the
+ * snapshot / kick the agent) and speaks `reply_text` via ElevenLabs.
+ */
+export async function parseJarvisIntent(
+  transcript: string,
+  currentDistrict: string,
+): Promise<JarvisIntent> {
+  const prompt = [
+    "You are JARVIS, the voice copilot of FOODSCAPE — an isometric food-city map of London where every restaurant is rendered as a building made of its signature dish.",
+    `The user is currently looking at the "${currentDistrict}" district.`,
+    "Parse their spoken command into one action:",
+    "- move_to: they want to go to / look at a district (set district).",
+    "- find_cuisine: they want to find a cuisine, dish, or food type (set cuisine to the keyword).",
+    "- describe: they're asking what's good / best here, or about a place (no district/cuisine needed).",
+    "- refresh: they want to update / refresh / re-scan the city for what changed.",
+    "Always write a short, warm reply_text to speak back. If they name a cuisine, mention it.",
+    "",
+    `Command: "${transcript}"`,
+  ].join("\n");
+
+  const response = await client().models.generateContent({
+    model: TEXT_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: INTENT_SCHEMA,
+      temperature: 0.3,
+    },
+  });
+
+  const text = response.text;
+  if (!text) {
+    const block = response.promptFeedback?.blockReason;
+    throw new Error(`parseJarvisIntent returned no text (blockReason=${block ?? "none"}).`);
+  }
+  return JSON.parse(text) as JarvisIntent;
+}
+
+/** Enrichment for one OSM eatery: a dish + tiling food material from its name. */
+export interface EateryEnrichment {
+  name: string;
+  cuisine: string;
+  signature_dish: string;
+  food_material: string;
+}
+
+const ENRICH_SCHEMA: Schema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      name: { type: Type.STRING, description: "The restaurant name, copied EXACTLY from the input" },
+      cuisine: { type: Type.STRING, description: "Cuisine, refined from the name/tag, e.g. Japanese, Italian" },
+      signature_dish: {
+        type: Type.STRING,
+        description: "A plausible signature / best-known dish for this kind of place",
+      },
+      food_material: {
+        type: Type.STRING,
+        description:
+          "A TILING, surface-filling phrasing of the dish that can be the WHOLE building material covering every wall + roof (e.g. 'a packed wall of nigiri sushi and nori', 'a facade of twirled spaghetti and meatballs'), NOT a single garnish. Discrete foods must be massed/tiled.",
+      },
+    },
+    required: ["name", "cuisine", "signature_dish", "food_material"],
+    propertyOrdering: ["name", "cuisine", "signature_dish", "food_material"],
+  },
+};
+
+/**
+ * Batch-assign a cuisine, signature dish, and tiling food_material to a list of
+ * real OSM eateries — ONE structured call for all of them (cheap, vs. one per
+ * place). The model keeps each input name verbatim so the caller can match back.
+ */
+export async function enrichEateries(
+  districtName: string,
+  eateries: Array<{ name: string; cuisine: string | null }>,
+): Promise<EateryEnrichment[]> {
+  if (!eateries.length) return [];
+  const list = eateries
+    .map((e, i) => `${i + 1}. ${e.name}${e.cuisine ? ` (OSM cuisine: ${e.cuisine})` : ""}`)
+    .join("\n");
+
+  const prompt = [
+    `These are real eateries in ${districtName}, London (from OpenStreetMap).`,
+    "For EVERY entry, return an object with the name COPIED EXACTLY, its cuisine, a plausible signature dish, and a tiling food_material that could re-skin an ENTIRE building (every wall + roof), not a garnish.",
+    "Return one object per input, same count, names matching the input exactly.",
+    "",
+    "EATERIES:",
+    list,
+  ].join("\n");
+
+  const response = await client().models.generateContent({
+    model: TEXT_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: ENRICH_SCHEMA,
+      temperature: 0.6,
+    },
+  });
+
+  const text = response.text;
+  if (!text) {
+    const block = response.promptFeedback?.blockReason;
+    throw new Error(`enrichEateries returned no text (blockReason=${block ?? "none"}).`);
+  }
+  return JSON.parse(text) as EateryEnrichment[];
+}

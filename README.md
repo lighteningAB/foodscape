@@ -1,5 +1,11 @@
 # 🍣 Foodscape
 
+### ▶ Live: **[foodscape-olive.vercel.app](https://foodscape-olive.vercel.app)**
+
+> Open it, click the glowing blue orb (bottom-right), and say **"find me italian"** —
+> the camera flies to the matches, rings them, and JARVIS answers out loud. No mic? A typed
+> input appears. Drag to pan, scroll to zoom.
+
 > **An [isometric.nyc](https://isometric.nyc/) for London — built out of food.**
 > Every tile is the **real building** at that London spot (its actual massing, storeys,
 > roofline, footprint) **re-skinned in the signature food** of the best restaurant there —
@@ -13,19 +19,23 @@
 ## What it does
 
 1. **Pick a London district** (Soho, Shoreditch, Camden, Mayfair, Brixton).
-2. **Tavily** searches the live web for that district's best restaurants — name, cuisine,
-   signature dish, address.
-3. Each restaurant's **real building** is resolved from OpenStreetMap (footprint + storeys
-   + roofline) and **Gemini** turns it into a structured tile spec, choosing a *tiling food
-   material* for the re-skin.
+2. **Hybrid discovery** fills the district densely: **OpenStreetMap** Overpass returns ~50 real
+   eateries (with real coordinates + footprints), and **Tavily** web search grounds the top
+   named spots with their real signature dishes.
+3. **Gemini** assigns each place a *tiling food material* for the re-skin (one batch call),
+   and the real building's massing is taken straight from its OSM footprint.
 4. **Nano Banana** (Gemini's image model) renders each building as a pixel-art isometric tile,
    keeping the real silhouette but re-skinning every surface in food — anchored to a single
    locked style reference so the whole city looks coherent.
 5. Tiles composite onto an isometric grid in the browser → a living food-city.
 6. **JARVIS**, a floating voice orb, lets you talk to the map ("take me to Soho", "find me
    ramen") and replies out loud via **ElevenLabs**.
-7. **The autonomous agent** re-runs the search on a schedule, diffs against what it already
-   built, and regenerates only the tiles that changed — narrating the diff in voice.
+7. **The autonomous agent** re-runs discovery on a schedule, diffs against what it already
+   built, and regenerates only the tiles that changed — updating the map silently in place.
+
+> **Live now:** Soho is built dense — **~50 real food buildings** on their real OSM footprints.
+> The set updates itself whenever the agent re-runs (a new spot, a closure, a changed dish),
+> and it does so **silently** — the user just sees a current city, never the agent working.
 
 ---
 
@@ -48,15 +58,25 @@ image-gen calls produce one coherent isometric world where each building stays r
 
 ### 2. Tavily — live web grounding
 [`@tavily/core`](https://www.npmjs.com/package/@tavily/core) provides the real-world signal.
-`lib/tavily.ts → searchRestaurants(district)` runs an advanced web search per district for the
-best restaurants and their signature dishes. This is what makes the city **real and current** —
-and what the autonomous agent re-runs to detect change (a new top spot, a closure, a new dish).
+`lib/tavily.ts → searchRestaurants(district)` runs an advanced web search per district and
+**grounds the top named spots** with their real, current signature dishes — layered over the
+OSM breadth (`lib/eateries.ts`) so the city is both **dense and real**. The autonomous agent
+re-runs this to detect change (a new spot, a closure, a new dish).
 
 ### 3. ElevenLabs — the voice of JARVIS
 [`@elevenlabs/elevenlabs-js`](https://www.npmjs.com/package/@elevenlabs/elevenlabs-js) gives the
-orb its voice. `api/narrate/route.ts` turns JARVIS replies and the agent's change feed into
-speech ("Kiln overtook Bao on Brewer Street"), making the orb both the navigation UX and the
-agent's narrator.
+orb its voice. `lib/elevenlabs.ts → synthesize()` calls `textToSpeech.convert()`
+(`eleven_multilingual_v2`, MP3) and `api/narrate/route.ts` streams it back as `audio/mpeg` —
+turning JARVIS replies and the agent's change feed into speech, making the orb both the
+navigation UX and the agent's narrator. TTS failure degrades gracefully to text-only.
+
+**JARVIS** (`components/JarvisOrb.tsx`) is a **click-to-talk particle orb** — a canvas swarm
+that recolours and energises across its idle → listening → thinking → speaking states (no
+emoji). Click → Web Speech API speech-to-text → the transcript hits `api/jarvis/route.ts`,
+where Gemini parses it into a structured intent (`find_cuisine` / `move_to` / `describe` /
+`refresh`). For **"find me italian"** it queries the Blob snapshot, flies the camera to the
+matches and rings them on the map; then speaks the reply via ElevenLabs. No-mic browsers fall
+back to a typed input.
 
 > Persistence is **Vercel Blob** (private store `foodlondon`): district snapshots as JSON +
 > tile PNGs served through a token-authenticated proxy route.
@@ -183,13 +203,15 @@ src/
 │       ├── discover/route.ts     # Tavily -> restaurants -> Gemini specs   [done]
 │       ├── generate/route.ts     # Nano Banana tile gen -> Blob            (Phase 3)
 │       ├── tile/.../route.ts     # private-Blob tile proxy                 (Phase 3)
-│       ├── refresh/route.ts      # autonomous agent: refresh + diff        (Phase 4)
-│       ├── jarvis/route.ts       # voice intent -> action                  (Phase 5)
-│       └── narrate/route.ts      # ElevenLabs TTS                          (Phase 5)
+│       ├── refresh/route.ts      # autonomous agent: refresh + diff        [done]
+│       ├── jarvis/route.ts       # voice intent -> action + snapshot query  [done]
+│       └── narrate/route.ts      # ElevenLabs TTS -> audio/mpeg             [done]
 ├── lib/
 │   ├── tavily.ts · gemini.ts · style-anchor.ts · buildings.ts            [done]
-│   ├── discover.ts · london.ts                                           [done]
-│   └── store.ts · isometric.ts · agent.ts · elevenlabs.ts               (Phase 3-5)
+│   ├── discover.ts · london.ts · store.ts · agent.ts · foodbuilding.ts   [done]
+│   └── cityscape.ts · massing.ts · bg-remove.ts · elevenlabs.ts          [done]
+├── components/
+│   └── CityViewer.tsx · Cityscape.tsx · JarvisOrb.tsx (voice orb)        [done]
 └── public/style-anchor.png       # the locked pixel-art style reference   [done]
 ```
 
@@ -205,12 +227,26 @@ npm install
 #   TAVILY_API_KEY=          # app.tavily.com
 #   ELEVENLABS_API_KEY=      # elevenlabs.io  (ELEVENLABS_VOICE_ID optional)
 #   BLOB_READ_WRITE_TOKEN=   # Vercel Blob store "foodlondon"
+#   REFRESH_SECRET=          # guards /api/refresh (cron + manual); unset = open in local dev
 
-npm run dev          # http://localhost:3000
+npm run dev          # http://localhost:3000   (or use the live deploy above)
 
 # Try the discover pipeline directly (no server needed):
 node --conditions=react-server --env-file=.env.local --import tsx scripts/test-discover.ts soho
+
+# Verify the autonomous refresh agent's diff + selective regen (stubbed, no Tavily/Nano Banana):
+node --conditions=react-server --env-file=.env.local --import tsx scripts/test-refresh.ts
+
+# Check JARVIS voice-intent parsing (stub transcripts -> asserted intent; live Gemini):
+node --conditions=react-server --env-file=.env.local --import tsx scripts/test-jarvis.ts
+
+# Trigger the agent manually (local: no secret needed):
+curl "http://localhost:3000/api/refresh?district=soho"
 ```
+
+> **Cron note:** `vercel.json` schedules a daily GET to `/api/refresh`. Vercel does **not**
+> interpolate env vars into a cron `path` — before deploy, replace `$REFRESH_SECRET` in the
+> path with the literal secret value and set `REFRESH_SECRET` in the Vercel project env.
 
 > Scripts that import server libs need the `--conditions=react-server` flag — `lib/env.ts`
 > imports `server-only`, which throws in a plain Node process; that flag resolves it to a no-op.

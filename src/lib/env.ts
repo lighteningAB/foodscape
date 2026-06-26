@@ -22,4 +22,7 @@ export const env = {
     password: req("CLICKHOUSE_PASSWORD"),
   }),
   blobToken: () => opt("BLOB_READ_WRITE_TOKEN"),
+  /** Shared secret guarding the refresh agent (cron + manual). Optional: when
+   *  unset (local dev), /api/refresh runs unguarded. */
+  refreshSecret: () => opt("REFRESH_SECRET"),
 };
