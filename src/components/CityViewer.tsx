@@ -17,12 +17,15 @@ export default function CityViewer() {
   const [view, setView] = useState({ scale: 0.4, tx: 0, ty: 0 });
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  // Zoom-out floor: you can never zoom out past the whole-city fit scale.
+  const minScale = useRef(0.05);
 
   // Fit the whole city to the viewport (isometric.nyc style — screen always full).
   const fit = useCallback(() => {
     const el = mapRef.current;
     if (!el || !scape) return;
     const s = Math.min(el.clientWidth / scape.meta.width, el.clientHeight / scape.meta.height) * 0.96;
+    minScale.current = s;
     setView({ scale: s, tx: 0, ty: 0 });
   }, [scape]);
 
@@ -65,7 +68,7 @@ export default function CityViewer() {
       const sc = scape;
       if (!sc) return;
       const [px, py] = projectInto(sc.meta, lat, lng);
-      const s = Math.min(4, Math.max(0.05, zoom));
+      const s = Math.min(4, Math.max(minScale.current, zoom));
       setView({
         scale: s,
         tx: -s * (px - sc.meta.width / 2),
@@ -114,7 +117,7 @@ export default function CityViewer() {
   }, [loadHeroes]);
 
   // --- Camera ---
-  const clampScale = (s: number) => Math.min(4, Math.max(0.05, s));
+  const clampScale = (s: number) => Math.min(4, Math.max(minScale.current, s));
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     setView((v) => ({ ...v, scale: clampScale(v.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)) }));
@@ -169,7 +172,7 @@ export default function CityViewer() {
       </div>
 
         {selected && (
-          <div className="absolute bottom-4 left-4 w-72 rounded-xl border border-white/10 bg-zinc-900/95 p-4 shadow-xl backdrop-blur">
+          <div className="absolute bottom-4 left-4 z-30 w-72 rounded-xl border border-white/10 bg-zinc-900/95 p-4 shadow-xl backdrop-blur">
             <button
               onClick={() => setSelected(null)}
               className="absolute right-2 top-2 h-6 w-6 rounded-full text-zinc-400 hover:bg-white/10 hover:text-white"
